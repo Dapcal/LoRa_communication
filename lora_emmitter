@@ -1,0 +1,89 @@
+#include <SPI.h>
+#include <LoRa.h>
+#include <ArduinoJson.h>
+
+long currentFrequency = 915E6; // Fréquence actuelle
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+
+  Serial.println("LoRa Sender");
+
+  if (!LoRa.begin(currentFrequency)) {
+    Serial.println("Starting LoRa failed!");
+    while (1);
+  }
+  Serial.println("Démarré avec succès");
+
+  // Configuration LoRa
+  LoRa.setSpreadingFactor(12);
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(5);
+}
+
+void changeFrequency(long newFrequency) {
+  LoRa.end();
+  if (!LoRa.begin(newFrequency)) {
+    Serial.println("Changement de fréquence échoué !");
+    while (1);
+  }
+  currentFrequency = newFrequency;
+  Serial.print("Changement de fréquence vers : ");
+  Serial.println(currentFrequency);
+}
+
+void sendConfirmation() {
+  StaticJsonDocument<100> doc;
+  doc["type"] = "confirmation";
+
+  char buffer[100];
+  serializeJson(doc, buffer);
+
+  LoRa.beginPacket();
+  LoRa.print(buffer);
+  LoRa.endPacket();
+
+  Serial.println("Confirmation envoyée au récepteur.");
+}
+
+void loop() {
+  // Écouter les messages de changement de fréquence
+  int packetSize = LoRa.parsePacket();
+  if (packetSize) {
+    String receivedData = "";
+    while (LoRa.available()) {
+      char c = LoRa.read();
+      if (isPrintable(c)) {
+        receivedData += c;
+      }
+    }
+
+    StaticJsonDocument<100> doc;
+    DeserializationError error = deserializeJson(doc, receivedData);
+
+    if (!error && doc["type"] == "frequency_change") {
+      long newFrequency = doc["new_frequency"];
+      changeFrequency(newFrequency);
+      sendConfirmation();
+    }
+  }
+
+  // Envoyer les données des capteurs
+  StaticJsonDocument<200> doc;
+  doc["emetteur"] = 1; // Identifiant de l'émetteur
+  doc["capteur1"] = analogRead(A0);
+  doc["capteur2"] = analogRead(A1);
+  doc["capteur3"] = analogRead(A2);
+  doc["capteur4"] = analogRead(A3);
+
+  char buffer[200];
+  serializeJson(doc, buffer);
+
+  LoRa.beginPacket();
+  LoRa.print(buffer);
+  LoRa.endPacket();
+
+  Serial.println("Données envoyées: " + String(buffer));
+  delay(5000); // Envoi toutes les 5 secondes
+}
